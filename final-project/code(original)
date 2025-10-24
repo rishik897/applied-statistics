@@ -1,0 +1,180 @@
+
+# First we need to load several packages 
+library("haven")
+library("tidyverse")
+library("janitor")
+library("psych")
+library("ggplot2")
+library("gridExtra")
+library("tableone")
+library("gridExtra")
+library("car")
+library("mice")
+library("sjPlot")
+
+
+ultimate.ess <- read_dta("ESS11-subset.dta") 
+
+view(ultimate.ess)
+
+# Now we select the columns that contain our 5 predictor variables and our dependent variable. This cleaning can be performed using the select function 
+
+my_ess <- ultimate.ess %>% 
+    select(idno, stfeco, eisced, gndr, hinctnta, imwbcnt, stfhlth)
+
+View(my_ess)  
+
+# recoding 
+
+my_ess %>% tabyl(eisced) %>% adorn_totals()
+
+my_ess$eisced [my_ess$eisced == 55] <- NA
+
+my_ess %>% tabyl(eisced) %>% adorn_totals() #this is a check to ensure that all 55's have been appropriately recoded. This is confirmed by lines 28 and 32. In line 28 a table is outputted which shows there are 23 instances of 55 and 24 instances of NA for the variable education_lvl. Once 55 has been recoded to NA these 23 are added to 24 which yields 47 NA observations in the dataset. Line 32 produces another table after this recoding takes place which outputs an updated table that has 47 NA observations indicating the recoding was performed correctly.  
+
+view(my_ess)
+
+my_essdesc <- my_ess %>% select(- idno)
+
+print(CreateTableOne(data = my_essdesc), showAllLevels = TRUE)
+
+summary(my_ess$stfeco)
+summary(my_ess$eisced)
+summary(my_ess$gndr)
+summary(my_ess$hinctnta)
+summary(my_ess$stfhlth)
+
+
+
+
+
+# Visualisation 
+
+my_ess2 <- my_ess %>% 
+  mutate(income = 
+           if_else(hinctnta < 5, 0,
+            if_else(hinctnta <= 7, 1, 2))) %>% 
+  mutate(economy = 
+           if_else(stfeco < 5, 0,
+           if_else(stfeco <= 7, 1, 2))) %>% 
+  mutate(education = 
+           if_else(eisced <= 2, 0, 
+                   if_else(eisced <=4, 1, 2))) %>% 
+  mutate(gender =
+           if_else(gndr <= 1, 0,1))
+
+
+view(my_ess2)
+
+
+my_ess2$fct_income <- factor(my_ess2$income,
+                             labels = c(
+                               "low",
+                               "moderate",
+                               "high"
+                             ))
+
+my_ess2$fct_economy <- factor(my_ess2$economy, 
+                              labels = c(
+                                "dissatisfied",
+                                "moderately satisfied",
+                                "satisfied"))
+
+
+view(my_ess2)
+
+# ggplot(data = my_ess2, aes(x = fct_income, y = )) + geom_bar()
+
+
+aaa <- my_ess2 %>% 
+  group_by(fct_income, fct_economy) %>% 
+  summarise(count = n() ) %>% 
+  mutate(perc = (count/sum(count))*100)
+
+view(aaa)
+
+
+
+ggplot(aaa, aes(x = fct_income, y = perc, fill = fct_economy)) + geom_bar(stat = "identity") + labs(x = "Income Level", y = "Percent", fill = "Opinion on State of Economy")
+
+
+view(my_ess2)
+
+my_ess2$fct_education <- factor(my_ess2$education,
+                                labels = c(
+                                  "lower_sec_below",
+                                  "upper_sec",
+                                  "university_degrees"
+                                ))
+
+my_ess2$fct_gender <- factor(my_ess2$gender,
+                             labels = c(
+                               "Male",
+                               "Female"
+                             ))
+
+view(my_ess2)
+
+aaa2 <- my_ess2 %>% 
+  group_by(fct_education, fct_economy) %>% 
+  summarise(count = n() ) %>% 
+  mutate(perc = (count/sum(count))*100)
+
+view(aaa2)
+
+ggplot(aaa2, aes(x = fct_education, y = perc, fill = fct_economy)) + geom_bar(stat= "identity", position = "dodge") + labs(x = "Level of Education", y = "Percent", fill = "Opinion on State of Economy")
+
+
+
+
+# Linear Regression 
+
+
+my_ess_clean <- my_ess %>%
+  mutate(
+    gndr = as.factor(gndr),
+    eisced = as.factor(eisced),
+    hinctnta = as.factor(hinctnta),
+    stfeco = as.numeric(stfeco),
+    stfhlth = as.numeric(stfhlth),
+    imwbcnt = as.numeric(imwbcnt)
+  )
+
+
+
+form <- name.formulas(list(hinctnta ~ stfeco + stfhlth + imwbcnt + gndr + eisced))
+
+my_ess_imputed <- my_ess_clean %>% 
+  select(hinctnta, stfeco, stfhlth, imwbcnt, gndr, eisced) %>% 
+  mice(
+    formulas = form, 
+    meth = "pmm",
+    m = 30,
+    maxit = 10,
+    seed = 12345
+  )
+
+my_ess3 <- complete(my_ess_imputed, 1)
+
+view(my_ess3)
+
+densityplot(my_ess_imputed, ~ hinctnta)
+
+summary(my_ess3$hinctnta)
+
+my_ess3$hinctnta <- as.numeric(my_ess3$hinctnta)
+my_ess3$eisced <- as.numeric(my_ess3$eisced)
+
+
+
+model <- lm(stfeco ~ hinctnta + stfhlth + imwbcnt + gndr + eisced, data = my_ess3)
+
+tab_model(model)
+
+(cbind(vif(model)))
+
+
+summary(model)
+
+tab_model(model, show.se = TRUE, digits = 4, CSS = list(css.table = "border-collapse: separate; border-spacing: 10px 8px;"))
+
